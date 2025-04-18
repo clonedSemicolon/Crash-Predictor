@@ -2,15 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
-from utilities import extract_damage_value
+from utilities import extract_damage_value, load_crash_data, preprocess_crash_data, filter_data, load_map_html
 import plotly.express as px
-from sklearn.cluster import KMeans
-import folium
 
-# Set page configuration with reduced padding
 st.set_page_config(page_title="Chicago Crash Dashboard", layout="wide", initial_sidebar_state="collapsed")
 
-# Custom CSS to improve padding and layout
+# Custom CSS
 st.markdown("""
 <style>
     body {
@@ -38,82 +35,41 @@ st.markdown("""
         font-size: 1rem;
         color: #a0aec0;
     }
-    .chart-container {
-        background-color: #1c1f26;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
-    }
-    h1, h2, h3 {
-        color: #fff;
-    }
-    .stSelectbox, .stSlider {
-        background-color: #1c1f26;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# Dashboard title
 st.title("Chicago Crash Dashboard")
 
-# Load data
-total_dataset = 13
-combined_df = pd.concat([pd.read_csv(f'crash_data_{i + 1}.csv') for i in range(total_dataset)])
+if 'combined_df' not in st.session_state:
+    st.session_state['combined_df'] = preprocess_crash_data(load_crash_data())
 
-# Calculate damage costs
-combined_df['DAMAGE_VALUE'] = combined_df['DAMAGE'].apply(extract_damage_value)
-
-def categorize_damage(value):
-    if value <= 500:
-        return "$0 - $500"
-    elif value <= 1000:
-        return "$501 - $1,000"
-    elif value <= 1500:
-        return "$1,001 - $1,500"
-    else:
-        return "Over $1,500"
-
-combined_df['DAMAGE_CATEGORY'] = combined_df['DAMAGE_VALUE'].apply(categorize_damage)
-total_damage = combined_df['DAMAGE_VALUE'].sum()
-
-# st.write(combined_df.columns)
+combined_df = st.session_state['combined_df']
 
 # Sidebar Filters
 st.sidebar.header("Filter Data")
 start_date = st.sidebar.date_input("Start Date", pd.to_datetime('2020-01-01'))
 end_date = st.sidebar.date_input("End Date", pd.to_datetime('2025-01-01'))
-weather_condition = st.sidebar.selectbox("Select Weather Condition", ['All'] + list(combined_df['WEATHER_CONDITION'].unique()))
+weather_condition = st.sidebar.selectbox("Select Weather Condition", ['All'] + list(combined_df['WEATHER_CONDITION'].dropna().unique()))
 severity = st.sidebar.selectbox("Select Crash Severity", ['All', 'Minor', 'Moderate', 'Severe'])
 
-combined_df['CRASH_DATE'] = pd.to_datetime(combined_df['CRASH_DATE'], errors='coerce')
+filtered_df = filter_data(combined_df, start_date, end_date, weather_condition, severity)
+st.session_state['filtered_df'] = filtered_df
 
-
-# Apply Filters
-filtered_df = combined_df[(combined_df['CRASH_DATE'] >= pd.to_datetime(start_date)) & (combined_df['CRASH_DATE'] <= pd.to_datetime(end_date))]
-
-if weather_condition != 'All':
-    filtered_df = filtered_df[filtered_df['WEATHER_CONDITION'] == weather_condition]
-
-if severity != 'All':
-    filtered_df = filtered_df[filtered_df['INJURIES_TOTAL'] > 0 if severity == 'Severe' else (filtered_df['INJURIES_TOTAL'] == 0 if severity == 'Minor' else filtered_df['INJURIES_TOTAL'] > 0)]
-
-# Layout for metrics
+# Metrics
 col1, col2, col3 = st.columns([2, 3, 3])
-
 with col1:
     st.markdown("### Key Metrics")
-    
     total_crashes = len(filtered_df)
     total_injuries = filtered_df['INJURIES_TOTAL'].sum()
     avg_speed_limit = filtered_df['POSTED_SPEED_LIMIT'].mean()
+    total_damage = filtered_df['DAMAGE'].sum()
 
     metrics = [
         ("Total Crashes", f"{total_crashes:,}"),
         ("Total Injuries", f"{total_injuries:,}"),
         ("Avg Speed Limit", f"{avg_speed_limit:.1f} mph"),
-        ("Total Damage Cost", f"${total_damage:,.2f}")
+        ("Total Damage Cost", f"${total_damage}")
     ]
-
     for label, value in metrics:
         st.markdown(f"""
         <div class="metric-card">
@@ -121,57 +77,37 @@ with col1:
             <div class="metric-label">{label}</div>
         </div>
         """, unsafe_allow_html=True)
-        st.write("")  # Add some space between cards
-    
+        st.write("")
+
+# Crash Severity Pie
 with col2:
     st.markdown("### Crash Severity Breakdown")
-    
-    no_injuries_count = sum(filtered_df['INJURIES_TOTAL'] == 0)
-    injuries_count = sum(filtered_df['INJURIES_TOTAL'] > 0)
-    
     fig = go.Figure(data=[go.Pie(labels=['No Injuries', 'Injuries'],
-                                 values=[no_injuries_count, injuries_count],
+                                 values=[(filtered_df['INJURIES_TOTAL']==0).sum(), (filtered_df['INJURIES_TOTAL']>0).sum()],
                                  hole=.3,
                                  marker_colors=['#4cc9f0', '#f72585'])])
-    
-    fig.update_layout(
-        title_text="Crashes with Injuries vs No Injuries",
-        showlegend=True,
-        legend_orientation="h",
-        legend=dict(x=0.5, xanchor="center"),
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='white')
-    )
-    
+    fig.update_layout(title_text="Crashes with Injuries vs No Injuries", legend_orientation="h", legend=dict(x=0.5, xanchor="center"),
+                      plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
     st.plotly_chart(fig, use_container_width=True)
 
+# Damage Cost Bar
 with col3:
     st.markdown("### Economic Impact")
     damage_summary = filtered_df.groupby('DAMAGE_CATEGORY')['DAMAGE_VALUE'].sum().sort_values(ascending=True)
-    fig = go.Figure(go.Bar(
-        x=damage_summary.values,
-        y=damage_summary.index,
-        orientation='h',
-        marker_color='#4cc9f0'
-    ))
-    fig.update_layout(
-        title='Damage Cost by Category',
-        xaxis_title='Total Damage Cost ($)',
-        yaxis_title='Damage Category',
-        font=dict(color='white'),
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
-    st.plotly_chart(fig, use_container_width=True)  
+    fig = go.Figure(go.Bar(x=damage_summary.values, y=damage_summary.index, orientation='h', marker_color='#4cc9f0'))
+    fig.update_layout(title='Damage Cost by Category', xaxis_title='Total Damage Cost ($)', yaxis_title='Damage Category',
+                      font=dict(color='white'), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig, use_container_width=True)
 
 
+    
+
+# Crash Map
 st.markdown("### Crash Hotspot Map")
-with open("chicago_map.html", "r", encoding="utf-8") as f:
-    html_data = f.read()
-components.html(html_data, height=700, scrolling=False) 
+html_data = load_map_html()
+components.html(html_data, height=700, scrolling=False)
 
-# Time-based analysis layout
+
 st.markdown("### Time-based Analysis")
 
 col4, col5 = st.columns(2)
@@ -234,36 +170,3 @@ with col7:
     fig_light.update_layout(title='Lighting Conditions During Crashes', font=dict(color='white'),
     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
     st.plotly_chart(fig_light, use_container_width=True)
-
-# Downloadable Report Button
-st.markdown("### Download Filtered Crash Data")
-def download_button(df, button_text="Download Data as CSV"):
-    csv = df.to_csv(index=False)
-    st.download_button_
-
-
-# Cluster by road type and severity (e.g., residential vs. arterial roads)
-clustering_df = filtered_df[['TRAFFICWAY_TYPE', 'INJURIES_TOTAL']].dropna()
-
-# Encode road type to numeric
-clustering_df['ROADWAY_TYPE'] = clustering_df['TRAFFICWAY_TYPE'].astype('category').cat.codes
-
-# Apply KMeans clustering
-kmeans = KMeans(n_clusters=4, random_state=42)
-clustering_df['Cluster'] = kmeans.fit_predict(clustering_df[['ROADWAY_TYPE', 'INJURIES_TOTAL']])
-
-# Visualize the clusters
-fig = go.Figure(go.Bar(
-    x=clustering_df['Cluster'].value_counts().index,
-    y=clustering_df['Cluster'].value_counts().values,
-    marker_color='#f72585'
-))
-fig.update_layout(
-    title='Crash Clusters by Road Type and Severity',
-    xaxis_title='Cluster',
-    yaxis_title='Number of Crashes',
-    font=dict(color='white'),
-    plot_bgcolor='rgba(0,0,0,0)',
-    paper_bgcolor='rgba(0,0,0,0)'
-)
-st.plotly_chart(fig, use_container_width=True)
