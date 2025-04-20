@@ -3,8 +3,8 @@ import joblib
 import pandas as pd
 
 # Load model and encoders
-model = joblib.load('../model/random_forest/RFclassifier.joblib')
-label_encoders = joblib.load('../model/random_forest/RF_encoders.joblib')
+model = joblib.load('./models/random_forest/RFclassifier.joblib')
+label_encoders = joblib.load('./models/random_forest/RF_encoders.joblib')
 
 st.title('Crash Type Predictor')
 

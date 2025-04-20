@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
-from utilities import extract_damage_value, load_crash_data, preprocess_crash_data, filter_data, load_map_html
+from utilities import *
 import plotly.express as px
+import threading
 
 st.set_page_config(page_title="Chicago Crash Dashboard", layout="wide", initial_sidebar_state="collapsed")
 
@@ -41,9 +42,15 @@ st.markdown("""
 st.title("Chicago Crash Dashboard")
 
 if 'combined_df' not in st.session_state:
-    st.session_state['combined_df'] = preprocess_crash_data(load_crash_data())
+    st.session_state['combined_df'] = preprocess_crash_data(load_crash_data_with_progress())   
 
 combined_df = st.session_state['combined_df']
+
+if 'map_html' not in st.session_state:
+    def preload_map():
+        st.session_state['map_html'] = load_large_html_map()
+
+    threading.Thread(target=preload_map).start()
 
 # Sidebar Filters
 st.sidebar.header("Filter Data")
@@ -62,7 +69,8 @@ with col1:
     total_crashes = len(filtered_df)
     total_injuries = filtered_df['INJURIES_TOTAL'].sum()
     avg_speed_limit = filtered_df['POSTED_SPEED_LIMIT'].mean()
-    total_damage = filtered_df['DAMAGE'].sum()
+    total_damage = filtered_df['DAMAGE_VALUE'].sum()
+    total_damage = f"{total_damage / 1_000_000:.2f}M"
 
     metrics = [
         ("Total Crashes", f"{total_crashes:,}"),
@@ -103,9 +111,9 @@ with col3:
     
 
 # Crash Map
-st.markdown("### Crash Hotspot Map")
-html_data = load_map_html()
-components.html(html_data, height=700, scrolling=False)
+# st.markdown("### Crash Hotspot Map")
+# html_data = load_map_html()
+# components.html(html_data, height=700, scrolling=False)
 
 
 st.markdown("### Time-based Analysis")

@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from utilities import load_crash_data, preprocess_crash_data
+from utilities import load_crash_data_with_progress, preprocess_crash_data
 
 st.set_page_config(page_title="Road Safety Insights", layout="wide")
 st.title("🚦 Road Safety Condition Insights")
 
 if 'combined_df' not in st.session_state:
-    st.session_state['combined_df'] = preprocess_crash_data(load_crash_data())
+    st.session_state['combined_df'] = preprocess_crash_data(load_crash_data_with_progress())
 
 combined_df = st.session_state['combined_df']
 

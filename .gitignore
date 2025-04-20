@@ -1,0 +1,6 @@
+.venv
+crash_data_[1-9].csv
+crash_data_1[0-3].csv
+models/riskModel/target_encoder.pkl
+models/riskModel/encoders.pkl
+models/riskModel/model.pkl
